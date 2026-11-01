@@ -34,7 +34,7 @@ The v0 prototype explores four core capabilities:
 - **Scoped consent:** An OAuth-style consent screen through which users grant specific permissions.
 - **Access enforcement:** Supabase Row Level Security (RLS) restricts which records the agent can retrieve based on the user's grant.
 - **Permission revocation:** Users can withdraw access; subsequent requests should be denied access to protected records.
-- **Auditability:** An audit model to support visibility into access decisions.
+- **Auditability:** Grant events (approved, revoked, last used) are recorded to support visibility into access decisions; a per-request audit log is proposed for future development.
 
 ## 5. Functional Requirements
 
@@ -42,7 +42,7 @@ The v0 prototype explores four core capabilities:
 2. Granted permissions are associated with the relevant user and agent.
 3. Database access is restricted according to the approved permission scope.
 4. Revoking a grant prevents subsequent requests from retrieving records protected by that grant.
-5. Access decisions can be traced through the audit model.
+5. Grant events (approved, revoked, last used) are recorded; a per-request audit log is proposed for future development.
 
 ## 6. Prototype Validation
 
