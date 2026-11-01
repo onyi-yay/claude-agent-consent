@@ -1,0 +1,26 @@
+{
+  "name": "claude-agent-consent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "web": "tsx web/server.ts",
+    "agent:connect": "tsx agent/connect.ts",
+    "agent:ask": "tsx agent/ask.ts",
+    "agent:status": "tsx agent/status.ts",
+    "agent:peek": "tsx agent/peek.ts",
+    "agent:view": "tsx agent/view.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "@supabase/supabase-js": "^2.117.3",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

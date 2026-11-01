@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authorize Agent</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/config.js"></script>
+</head>
+<body>
+<main>
+  <h1>Authorize access</h1>
+  <p class="muted">An AI agent is asking to read some of your data.</p>
+  <div id="root"></div>
+</main>
+
+<script type="module">
+  import { supabase, requireSession, SCOPE_LABELS, NOTE_FOLDERS, escapeHtml, $ } from "/app.js";
+
+  const root = $("#root");
+  const params = new URLSearchParams(location.search);
+  const request = {
+    clientId: params.get("client_id"),
+    redirectUri: params.get("redirect_uri"),
+    state: params.get("state") ?? "",
+    challenge: params.get("code_challenge"),
+    method: params.get("code_challenge_method") ?? "S256",
+    scopes: (params.get("scope") ?? "").split(/[\s+]+/).filter(Boolean),
+  };
+
+  function fail(message) {
+    // Never redirect to an unverified redirect_uri: show the error here.
+    root.innerHTML = `<div class="card"><p class="error">${escapeHtml(message)}</p></div>`;
+  }
+
+  function redirectBack(query) {
+    const target = new URL(request.redirectUri);
+    for (const [key, value] of Object.entries({ ...query, state: request.state })) {
+      target.searchParams.set(key, value);
+    }
+    location.assign(target.toString());
+  }
+
+  async function main() {
+    if (!request.clientId || !request.redirectUri || !request.challenge) {
+      return fail("This authorization link is incomplete (needs client_id, redirect_uri and code_challenge).");
+    }
+
+    const session = await requireSession(root);
+
+    const { data: clients, error } = await supabase.rpc("get_agent_client", { p_client_id: request.clientId });
+    const client = clients?.[0];
+    if (error || !client) return fail("Unknown agent. This link may be forged.");
+    if (!client.redirect_uris.includes(request.redirectUri)) {
+      return fail("This agent's redirect address is not registered. This link may be forged.");
+    }
+
+    const scopes = request.scopes.filter((s) => client.allowed_scopes.includes(s));
+    if (scopes.length === 0) return fail("The agent did not request any permissions it is allowed to ask for.");
+
+    root.innerHTML = `
+      <div class="card stack">
+        <div class="row">
+          <div class="agent-mark" aria-hidden="true">${escapeHtml(client.name[0])}</div>
+          <div>
+            <h2>${escapeHtml(client.name)}</h2>
+            <div class="muted">${escapeHtml(client.description)}</div>
+          </div>
+        </div>
+        <p>Signed in as <strong>${escapeHtml(session.user.email)}</strong>. It is asking to:</p>
+        <form id="consent" class="stack">
+          ${scopes.map((scope) => `
+            <label class="check">
+              <input type="checkbox" name="scope" value="${escapeHtml(scope)}" checked>
+              <span>${escapeHtml(SCOPE_LABELS[scope] ?? scope)}</span>
+            </label>
+            ${scope === "notes:read" ? `
+              <div class="folders" id="folders">
+                ${NOTE_FOLDERS.map((f) => `
+                  <label class="check"><input type="checkbox" name="folder" value="${f}" checked> ${f}</label>`).join("")}
+              </div>` : ""}`).join("")}
+          <p class="muted">Read only. It cannot change or delete anything. You can revoke access at any time from your
+            <a href="/">dashboard</a>, and its next request will be refused.</p>
+          <div class="row">
+            <button type="submit" id="approve">Allow access</button>
+            <button type="button" class="secondary" id="deny">Deny</button>
+          </div>
+          <p class="error" id="message" role="alert"></p>
+        </form>
+      </div>`;
+
+    const form = $("#consent");
+    const checked = (name) => [...form.querySelectorAll(`input[name=${name}]:checked`)].map((i) => i.value);
+
+    function sync() {
+      const notesBox = form.querySelector('input[name=scope][value="notes:read"]');
+      const folderInputs = form.querySelectorAll("input[name=folder]");
+      folderInputs.forEach((i) => (i.disabled = notesBox && !notesBox.checked));
+      const ok = checked("scope").length > 0 && !(notesBox?.checked && checked("folder").length === 0);
+      $("#approve").disabled = !ok;
+    }
+    form.addEventListener("change", sync);
+    sync();
+
+    $("#deny").addEventListener("click", () => redirectBack({ error: "access_denied" }));
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      $("#approve").disabled = true;
+      const grantedScopes = checked("scope");
+      const folders = checked("folder");
+      const { data: code, error } = await supabase.rpc("authorize_agent", {
+        p_client_id: client.id,
+        p_redirect_uri: request.redirectUri,
+        p_scopes: grantedScopes,
+        // Every folder ticked means "all folders", including ones added later.
+        p_note_folders: grantedScopes.includes("notes:read") && folders.length < NOTE_FOLDERS.length ? folders : null,
+        p_code_challenge: request.challenge,
+        p_code_challenge_method: request.method,
+      });
+      if (error) {
+        $("#message").textContent = error.message;
+        $("#approve").disabled = false;
+        return;
+      }
+      redirectBack({ code });
+    });
+  }
+
+  main();
+</script>
+</body>
+</html>

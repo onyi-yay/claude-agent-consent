@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connected Agents</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/config.js"></script>
+</head>
+<body>
+<main>
+  <div class="row spread">
+    <div>
+      <h1>Connected agents</h1>
+      <p class="muted">Agents you have given access to your notes and tasks.</p>
+    </div>
+    <button class="secondary" id="sign-out" hidden>Sign out</button>
+  </div>
+  <div id="root"></div>
+</main>
+
+<script type="module">
+  import { supabase, requireSession, SCOPE_LABELS, escapeHtml, $ } from "/app.js";
+
+  const root = $("#root");
+  const fmt = (ts) => (ts ? new Date(ts).toLocaleString() : "—");
+
+  async function renderGrants() {
+    const { data: grants, error } = await supabase.rpc("list_my_agent_grants");
+    const box = $("#grants");
+    if (error) return (box.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`);
+    if (grants.length === 0) {
+      return (box.innerHTML = `<p class="muted">No agents connected yet. Run <code>npm run agent:connect</code>.</p>`);
+    }
+    box.innerHTML = `
+      <table>
+        <thead><tr><th>Agent</th><th>Access</th><th class="hide-sm">Last used</th><th></th></tr></thead>
+        <tbody>
+          ${grants.map((g) => `
+            <tr>
+              <td><strong>${escapeHtml(g.client_name)}</strong><br>
+                <span class="pill ${g.status}">${g.status}</span>
+                <div class="muted">Granted ${fmt(g.created_at)}</div>
+                ${g.revoked_at ? `<div class="muted">Revoked ${fmt(g.revoked_at)}</div>` : ""}</td>
+              <td>${g.scopes.map((s) => escapeHtml(SCOPE_LABELS[s] ?? s)).join("<br>")}
+                ${g.scopes.includes("notes:read") ? `<div class="muted">Folders: ${escapeHtml(g.note_folders?.join(", ") ?? "all")}</div>` : ""}</td>
+              <td class="hide-sm">${fmt(g.last_used_at)}</td>
+              <td>${g.status === "active" ? `<button class="danger" data-revoke="${g.id}">Revoke</button>` : ""}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>`;
+  }
+
+  async function renderData() {
+    const [notes, tasks] = await Promise.all([
+      supabase.from("notes").select("folder, title").order("folder"),
+      supabase.from("tasks").select("title, status, due_date").order("due_date"),
+    ]);
+    const box = $("#data");
+    if (notes.error || tasks.error) {
+      return (box.innerHTML = `<p class="error">${escapeHtml((notes.error ?? tasks.error).message)}</p>`);
+    }
+    if (notes.data.length === 0 && tasks.data.length === 0) {
+      box.innerHTML = `<p class="muted">You have no data yet.</p><button id="seed">Load sample notes and tasks</button>`;
+      return;
+    }
+    box.innerHTML = `
+      <p class="muted">${notes.data.length} notes, ${tasks.data.length} tasks.</p>
+      <table>
+        <thead><tr><th>Note</th><th>Folder</th></tr></thead>
+        <tbody>${notes.data.map((n) => `<tr><td>${escapeHtml(n.title)}</td><td>${escapeHtml(n.folder)}</td></tr>`).join("")}</tbody>
+      </table>
+      <table style="margin-top:16px">
+        <thead><tr><th>Task</th><th>Status</th><th>Due</th></tr></thead>
+        <tbody>${tasks.data.map((t) => `<tr><td>${escapeHtml(t.title)}</td><td>${escapeHtml(t.status)}</td><td>${escapeHtml(t.due_date ?? "—")}</td></tr>`).join("")}</tbody>
+      </table>`;
+  }
+
+  async function main() {
+    await requireSession(root);
+    $("#sign-out").hidden = false;
+    root.innerHTML = `
+      <section class="card"><div id="grants">Loading…</div></section>
+      <section class="card stack"><h2>Your data</h2><div id="data">Loading…</div></section>`;
+
+    root.addEventListener("click", async (event) => {
+      const revokeId = event.target.dataset?.revoke;
+      if (revokeId) {
+        event.target.disabled = true;
+        const { error } = await supabase.rpc("revoke_agent_grant", { p_grant_id: revokeId });
+        if (error) alert(error.message);
+        await renderGrants();
+      }
+      if (event.target.id === "seed") {
+        event.target.disabled = true;
+        const { error } = await supabase.rpc("load_sample_data");
+        if (error) alert(error.message);
+        await renderData();
+      }
+    });
+
+    await Promise.all([renderGrants(), renderData()]);
+  }
+
+  $("#sign-out").addEventListener("click", async () => {
+    await supabase.auth.signOut();
+    location.reload();
+  });
+
+  main();
+</script>
+</body>
+</html>
